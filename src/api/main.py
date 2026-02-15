@@ -1,17 +1,18 @@
 """
 =============================================================================
-AX5 UrbanIA — API FastAPI
+AX5 UrbanIA — API FastAPI v0.2.0
 =============================================================================
-API principale pour la suite de sécurité prédictive urbaine.
-Expose les scores de risque, alertes et données des 3 couches.
+API avec intégration complète des 3 couches:
+  Couche 1: CNESSTLesionsRAGAgent (54 403 lésions)
+  Couche 2: SAAQWorkZoneAgent (8 173 accidents zone travaux)
+  Couche 3: UrbanFlowAgent (7 sources MTL temps réel)
 
-Endpoints:
-  /health              → Santé de l'API
-  /api/v1/score/{zone} → Score risque urbain composite
-  /api/v1/alerts       → Alertes actives
-  /api/v1/cnesst/query → Requête RAG données CNESST
-  /api/v1/saaq/query   → Requête RAG données SAAQ
-  /api/v1/sources      → Statut des 9 sources de données
+Nouveaux endpoints:
+  /api/v1/snapshot    → Snapshot complet situation urbaine
+  /api/v1/weather     → Conditions météo + facteur risque
+  /api/v1/entraves    → Entraves CIFS actives
+  /api/v1/graph/stats → Stats du SafetyGraph
+  /api/v1/refresh     → Rafraîchir toutes les couches
 =============================================================================
 """
 
@@ -19,13 +20,15 @@ import logging
 from contextlib import asynccontextmanager
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from src.agents.cnesst_lesions_agent import CNESSTLesionsRAGAgent
 from src.agents.saaq_workzone_agent import SAAQWorkZoneAgent
+from src.agents.urban_flow_agent import UrbanFlowAgent
 from src.models.urban_risk_score import UrbanRiskScoringEngine
+from src.graph.safety_graph import SafetyGraphManager
 
 logger = logging.getLogger(__name__)
 
@@ -65,31 +68,39 @@ agents = {}
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Initialise les agents au démarrage."""
-    logger.info("🚀 AX5 UrbanIA API — Démarrage")
+    logger.info("🚀 AX5 UrbanIA API v0.2.0 — Démarrage")
 
-    # Initialiser les agents
+    # Agents Couche 1 + 2
     agents["cnesst"] = CNESSTLesionsRAGAgent()
     agents["saaq"] = SAAQWorkZoneAgent()
+
+    # Agent Couche 3
+    agents["urban_flow"] = UrbanFlowAgent()
+
+    # Scoring engine
     agents["scoring"] = UrbanRiskScoringEngine()
 
-    # Charger les données si disponibles
-    try:
-        agents["cnesst"].load_csv_files()
-        agents["cnesst"].compute_urban_risk_export()
-        logger.info("✅ CNESSTLesionsRAGAgent chargé")
-    except Exception as e:
-        logger.warning(f"⚠️ CNESST non chargé: {e}")
+    # SafetyGraph
+    agents["graph"] = SafetyGraphManager()
+    agents["graph"].connect()
 
-    try:
-        agents["saaq"].load_csv_files()
-        agents["saaq"].build_risk_profiles()
-        logger.info("✅ SAAQWorkZoneAgent chargé")
-    except Exception as e:
-        logger.warning(f"⚠️ SAAQ non chargé: {e}")
+    # Charger données probantes
+    for name, agent in [("cnesst", agents["cnesst"]), ("saaq", agents["saaq"])]:
+        try:
+            agent.load_csv_files()
+            if name == "cnesst":
+                agent.compute_urban_risk_export()
+            else:
+                agent.build_risk_profiles()
+            logger.info(f"✅ {name} chargé")
+        except Exception as e:
+            logger.warning(f"⚠️ {name}: {e}")
 
     yield
 
+    # Shutdown
+    await agents["urban_flow"].close()
+    agents["graph"].close()
     logger.info("🛑 AX5 UrbanIA API — Arrêt")
 
 
@@ -99,160 +110,189 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="AX5 UrbanIA API",
-    description=(
-        "Suite de sécurité prédictive urbaine par IA agentique. "
-        "Protéger les gens AUTOUR des chantiers."
-    ),
-    version="0.1.0",
+    description="Sécurité prédictive urbaine — 3 couches, 9 sources, 1 SafetyGraph",
+    version="0.2.0",
     lifespan=lifespan,
 )
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 
 # =============================================================================
-# ENDPOINTS
+# ENDPOINTS — CORE
 # =============================================================================
 
 @app.get("/health")
 async def health():
-    """Santé de l'API et statut des agents."""
+    graph = agents.get("graph")
     return {
         "status": "ok",
-        "version": "0.1.0",
+        "version": "0.2.0",
         "agents": {
-            "cnesst": agents.get("cnesst") is not None,
-            "saaq": agents.get("saaq") is not None,
+            "cnesst": getattr(agents.get("cnesst"), "_loaded", False),
+            "saaq": getattr(agents.get("saaq"), "_loaded", False),
+            "urban_flow": agents.get("urban_flow") is not None,
             "scoring": agents.get("scoring") is not None,
+            "graph": graph.is_connected() if graph else False,
         },
     }
 
 
 @app.get("/api/v1/score/{zone_id}", response_model=ScoreResponse)
 async def get_risk_score(zone_id: str):
-    """
-    Calcule le score de risque urbain composite pour une zone.
-    Combine les 3 couches: CNESST + SAAQ + MTL.
-    """
-    scoring = agents.get("scoring")
-    if not scoring:
-        raise HTTPException(500, "Moteur de scoring non disponible")
+    """Score risque urbain composite pour une zone (3 couches)."""
+    scoring = agents["scoring"]
+    cnesst = agents["cnesst"]
+    saaq = agents["saaq"]
+    urban_flow = agents["urban_flow"]
 
-    cnesst_agent = agents.get("cnesst")
-    saaq_agent = agents.get("saaq")
-
+    # Couche 1
     cnesst_data = None
-    if cnesst_agent and cnesst_agent._loaded:
-        profile = cnesst_agent.risk_profiles.get("23")
-        if profile:
-            cnesst_data = {
-                "urban_risk_score": profile.urban_risk_score,
-                "taux_tms_pct": profile.taux_tms,
-                "trend_yoy_pct": profile.trend_yoy,
-            }
+    if getattr(cnesst, "_loaded", False):
+        p = cnesst.risk_profiles.get("23")
+        if p:
+            cnesst_data = {"urban_risk_score": p.urban_risk_score, "taux_tms_pct": p.taux_tms, "trend_yoy_pct": p.trend_yoy}
 
+    # Couche 2
     saaq_data = None
-    if saaq_agent and saaq_agent._loaded:
-        mtl_profile = saaq_agent.risk_profiles.get("montréal")
-        if mtl_profile:
+    if getattr(saaq, "_loaded", False):
+        mp = saaq.risk_profiles.get("montréal")
+        if mp:
             saaq_data = {
-                "risk_score": mtl_profile.risk_score,
-                "accidents_pietons": mtl_profile.accidents_pietons,
-                "accidents_cyclistes": mtl_profile.accidents_cyclistes,
-                "accidents_mortels_graves": mtl_profile.accidents_mortels_graves,
-                "accidents_veh_lourds": mtl_profile.accidents_veh_lourds,
+                "risk_score": mp.risk_score, "accidents_pietons": mp.accidents_pietons,
+                "accidents_cyclistes": mp.accidents_cyclistes,
+                "accidents_mortels_graves": mp.accidents_mortels_graves,
+                "accidents_veh_lourds": mp.accidents_veh_lourds,
             }
 
-    # TODO: Intégrer données temps réel MTL (Couche 3)
-    mtl_data = {
-        "flux_pietons": 0,
-        "flux_cyclistes": 0,
-        "entraves_actives": 0,
-        "sources_active": [],
-    }
+    # Couche 3
+    mtl_data = urban_flow.get_zone_data_for_scoring(zone_id)
 
     score = scoring.compute_score(zone_id, cnesst_data, saaq_data, mtl_data)
 
     return ScoreResponse(
-        zone_id=score.zone_id,
-        score=score.score,
-        severity=score.severity,
-        requires_hitl=score.requires_hitl,
-        couche1_cnesst=score.couche1_cnesst,
-        couche2_saaq=score.couche2_saaq,
-        couche3_mtl=score.couche3_mtl,
-        confidence=score.confidence,
-        sources_used=score.sources_used or [],
+        zone_id=score.zone_id, score=score.score, severity=score.severity,
+        requires_hitl=score.requires_hitl, couche1_cnesst=score.couche1_cnesst,
+        couche2_saaq=score.couche2_saaq, couche3_mtl=score.couche3_mtl,
+        confidence=score.confidence, sources_used=score.sources_used or [],
         target_profiles=score.target_profiles or [],
     )
 
 
+# =============================================================================
+# ENDPOINTS — COUCHE 3
+# =============================================================================
+
+@app.get("/api/v1/snapshot")
+async def get_urban_snapshot():
+    """Snapshot complet de la situation urbaine Montréal."""
+    agent = agents["urban_flow"]
+    snapshot = await agent.collect_all_sources()
+
+    return {
+        "timestamp": snapshot.timestamp,
+        "total_entraves": snapshot.total_entraves,
+        "total_zones_coactivite": snapshot.total_zones_coactivite,
+        "weather": {"factor": snapshot.weather_factor, "condition": snapshot.weather_condition},
+        "sources": {"active": snapshot.sources_active, "total": snapshot.sources_total},
+        "zones": [
+            {
+                "zone_id": z.zone_id, "arrondissement": z.arrondissement,
+                "exposure_score": z.exposure_score, "entraves": z.entraves_actives,
+                "flux_pietons": z.flux_pietons, "flux_cyclistes": z.flux_cyclistes,
+                "coactivity_factor": z.coactivity_factor,
+            }
+            for z in snapshot.zones
+        ],
+    }
+
+
+@app.get("/api/v1/weather")
+async def get_weather():
+    """Conditions météo + facteur de risque."""
+    weather = agents["urban_flow"].weather
+    current = await weather.fetch_current()
+    return weather.get_risk_factor()
+
+
+@app.get("/api/v1/entraves")
+async def get_entraves():
+    """Entraves CIFS actives."""
+    cifs = agents["urban_flow"].cifs
+    summary = await cifs.get_summary()
+    return {
+        "total": summary.total_entraves,
+        "par_arrondissement": summary.par_arrondissement,
+        "par_type": summary.par_type,
+        "zones_coactivite": summary.zones_coactivite,
+        "timestamp": summary.timestamp,
+    }
+
+
+# =============================================================================
+# ENDPOINTS — RAG
+# =============================================================================
+
 @app.post("/api/v1/cnesst/query", response_model=QueryResponse)
 async def query_cnesst(req: QueryRequest):
-    """Requête RAG sur les données CNESST Construction."""
-    agent = agents.get("cnesst")
-    if not agent:
-        raise HTTPException(503, "CNESSTLesionsRAGAgent non disponible")
-
-    answer = agent.query(req.question)
-    return QueryResponse(
-        answer=answer,
-        source="CNESST données ouvertes (2016-2022)",
-        agent_id=agent.AGENT_ID,
-    )
+    agent = agents["cnesst"]
+    return QueryResponse(answer=agent.query(req.question), source="CNESST (2016-2022)", agent_id=agent.AGENT_ID)
 
 
 @app.post("/api/v1/saaq/query", response_model=QueryResponse)
 async def query_saaq(req: QueryRequest):
-    """Requête RAG sur les données SAAQ zone travaux."""
-    agent = agents.get("saaq")
-    if not agent:
-        raise HTTPException(503, "SAAQWorkZoneAgent non disponible")
+    agent = agents["saaq"]
+    return QueryResponse(answer=agent.query(req.question), source="SAAQ (2020-2022)", agent_id=agent.AGENT_ID)
 
-    answer = agent.query(req.question)
-    return QueryResponse(
-        answer=answer,
-        source="SAAQ données ouvertes (2020-2022)",
-        agent_id=agent.AGENT_ID,
-    )
 
+@app.post("/api/v1/urban/query", response_model=QueryResponse)
+async def query_urban(req: QueryRequest):
+    agent = agents["urban_flow"]
+    return QueryResponse(answer=agent.query(req.question), source="MTL temps réel", agent_id=agent.AGENT_ID)
+
+
+# =============================================================================
+# ENDPOINTS — ADMIN
+# =============================================================================
 
 @app.get("/api/v1/sources")
 async def list_sources():
-    """Liste les 9 sources de données et leur statut."""
-    sources = [
-        {"id": 1, "name": "Entraves CIFS", "couche": 3, "type": "operationnelle", "status": "planned"},
-        {"id": 2, "name": "Comptages piétons", "couche": 3, "type": "operationnelle", "status": "planned"},
-        {"id": 3, "name": "Comptages vélos", "couche": 3, "type": "operationnelle", "status": "planned"},
-        {"id": 4, "name": "Capteurs Bluetooth", "couche": 3, "type": "operationnelle", "status": "planned"},
-        {"id": 5, "name": "Permis AGIR", "couche": 3, "type": "operationnelle", "status": "planned"},
-        {"id": 6, "name": "Météo Canada", "couche": 3, "type": "operationnelle", "status": "planned"},
-        {"id": 7, "name": "Stations Bixi", "couche": 3, "type": "operationnelle", "status": "planned"},
-    ]
+    sources = []
+    cnesst = agents["cnesst"]
+    saaq = agents["saaq"]
+    uf = agents["urban_flow"]
 
-    cnesst = agents.get("cnesst")
-    if cnesst and cnesst._loaded:
-        profile = cnesst.risk_profiles.get("23")
-        sources.append({
-            "id": 8, "name": "CNESST Lésions", "couche": 1, "type": "probante",
-            "status": "active", "records": profile.total_lesions if profile else 0,
-        })
-    else:
-        sources.append({"id": 8, "name": "CNESST Lésions", "couche": 1, "type": "probante", "status": "inactive"})
+    # Couche 3 sources
+    c3_sources = ["Entraves CIFS", "Comptages piétons", "Comptages vélos",
+                   "Capteurs Bluetooth", "Permis AGIR", "Météo Canada", "Stations Bixi"]
+    for i, name in enumerate(c3_sources, 1):
+        sources.append({"id": i, "name": name, "couche": 3, "status": "active" if i in [1, 6] else "planned"})
 
-    saaq = agents.get("saaq")
-    if saaq and saaq._loaded:
-        gp = saaq.risk_profiles.get("global")
-        sources.append({
-            "id": 9, "name": "SAAQ Zone travaux", "couche": 2, "type": "probante",
-            "status": "active", "records": gp.total_accidents if gp else 0,
-        })
-    else:
-        sources.append({"id": 9, "name": "SAAQ Zone travaux", "couche": 2, "type": "probante", "status": "inactive"})
+    # Couche 1
+    p = cnesst.risk_profiles.get("23") if getattr(cnesst, "_loaded", False) else None
+    sources.append({"id": 8, "name": "CNESST Lésions", "couche": 1,
+                     "status": "active" if p else "inactive", "records": p.total_lesions if p else 0})
 
-    return {"sources": sources, "total": len(sources), "active": sum(1 for s in sources if s.get("status") == "active")}
+    # Couche 2
+    gp = saaq.risk_profiles.get("global") if getattr(saaq, "_loaded", False) else None
+    sources.append({"id": 9, "name": "SAAQ Zone travaux", "couche": 2,
+                     "status": "active" if gp else "inactive", "records": gp.total_accidents if gp else 0})
+
+    return {"sources": sources, "total": 9, "active": sum(1 for s in sources if s.get("status") == "active")}
+
+
+@app.get("/api/v1/graph/stats")
+async def graph_stats():
+    return agents["graph"].get_stats()
+
+
+@app.post("/api/v1/refresh")
+async def refresh_all():
+    """Rafraîchit les 3 couches du SafetyGraph."""
+    graph = agents["graph"]
+    results = await graph.refresh_all_layers(
+        cnesst_agent=agents["cnesst"],
+        saaq_agent=agents["saaq"],
+        urban_flow_agent=agents["urban_flow"],
+    )
+    return {"status": "refreshed", "results": results}
