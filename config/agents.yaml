@@ -1,0 +1,58 @@
+# =============================================================================
+# AX5 UrbanIA — Configuration des agents
+# =============================================================================
+
+agents:
+  # Source 8 — Lésions professionnelles CNESST
+  cnesst_lesions:
+    id: cnesst-lesions-rag
+    version: "1.0.0"
+    source_priority: 8
+    couche: 1
+    data_dir: ./data/cnesst
+    scian_filter: "CONSTRUCTION"
+    years: [2016, 2017, 2018, 2019, 2020, 2021, 2022]
+    auto_load: true
+    refresh: annual
+
+  # Source 9 — Accidents zone travaux SAAQ
+  saaq_workzone:
+    id: saaq-workzone-rag
+    version: "1.0.0"
+    source_priority: 9
+    couche: 2
+    data_dir: ./data/saaq
+    workzone_filter: "CD_ZON_TRAVX_ROUTR == 'O'"
+    years: [2020, 2021, 2022]
+    auto_load: true
+    refresh: annual
+
+  # Sources 1-7 — Données ouvertes Montréal
+  urban_flow:
+    id: urban-flow-agent
+    version: "0.1.0"
+    source_priority: 1
+    couche: 3
+    sources:
+      - cifs
+      - pietons
+      - velos
+      - bluetooth
+      - agir
+      - meteo
+      - bixi
+    auto_load: false
+    refresh: realtime
+
+# Scoring
+scoring:
+  weights:
+    couche1_cnesst: 0.35
+    couche2_saaq: 0.25
+    couche3_mtl: 0.40
+  thresholds:
+    green: [0, 40]
+    yellow: [40, 65]
+    orange: [65, 85]
+    red: [85, 100]
+  hitl_required: [orange, red]

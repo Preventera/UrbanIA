@@ -1,0 +1,50 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+*.egg
+.eggs/
+venv/
+.venv/
+env/
+
+# Data files (too large for git)
+data/cnesst/*.csv
+data/saaq/*.csv
+data/mtl_sources/*.json
+data/mtl_sources/*.geojson
+*.sqlite
+*.db
+
+# Environment
+.env
+.env.local
+.env.production
+
+# IDE
+.vscode/settings.json
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Docker
+docker-compose.override.yml
+
+# Node (dashboard)
+node_modules/
+package-lock.json
+
+# Cache
+.cache/
+*.cache

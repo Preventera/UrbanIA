@@ -1,0 +1,58 @@
+version: "3.9"
+
+services:
+  # =============================================
+  # FalkorDB — SafetyGraph unifié
+  # =============================================
+  falkordb:
+    image: falkordb/falkordb:latest
+    container_name: urbania-safetygraph
+    ports:
+      - "6379:6379"
+    volumes:
+      - falkordb_data:/data
+    environment:
+      - FALKORDB_ARGS=--save 60 1
+    restart: unless-stopped
+
+  # =============================================
+  # PostGIS — Données géospatiales
+  # =============================================
+  postgis:
+    image: postgis/postgis:15-3.3
+    container_name: urbania-postgis
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: urbania
+      POSTGRES_PASSWORD: urbania
+      POSTGRES_DB: urbania_geo
+    volumes:
+      - postgis_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  # =============================================
+  # API — FastAPI UrbanIA
+  # =============================================
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: urbania-api
+    ports:
+      - "8000:8000"
+    environment:
+      - FALKORDB_HOST=falkordb
+      - FALKORDB_PORT=6379
+      - POSTGIS_URI=postgresql://urbania:urbania@postgis:5432/urbania_geo
+    volumes:
+      - ./data:/app/data
+      - ./src:/app/src
+    depends_on:
+      - falkordb
+      - postgis
+    restart: unless-stopped
+
+volumes:
+  falkordb_data:
+  postgis_data:

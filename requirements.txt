@@ -1,0 +1,47 @@
+# =============================================================
+# AX5 UrbanIA — Dépendances Python
+# =============================================================
+
+# --- API ---
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+pydantic>=2.5.0
+python-dotenv>=1.0.0
+
+# --- LLM ---
+anthropic>=0.40.0
+
+# --- Graph DB ---
+falkordb>=1.0.0
+redis>=5.0.0
+
+# --- Données ---
+pandas>=2.2.0
+numpy>=1.26.0
+
+# --- Géospatial ---
+geopandas>=0.14.0
+shapely>=2.0.0
+geojson>=3.0.0
+
+# --- HTTP ---
+httpx>=0.27.0
+aiohttp>=3.9.0
+
+# --- Base de données ---
+sqlalchemy>=2.0.0
+psycopg2-binary>=2.9.9
+
+# --- Vectorisation ---
+chromadb>=0.4.0
+sentence-transformers>=2.3.0
+
+# --- Monitoring ---
+loguru>=0.7.0
+
+# --- Tests ---
+pytest>=8.0.0
+pytest-asyncio>=0.23.0
+
+# --- Visualisation (optionnel) ---
+plotly>=5.18.0
