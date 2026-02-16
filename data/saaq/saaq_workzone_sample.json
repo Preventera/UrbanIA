@@ -1,0 +1,25 @@
+{
+  "metadata": {"source": "SAAQ", "dataset": "Accidents en zone de travaux routiers", "period": "2020-2022", "total_records": 8173, "license": "Données ouvertes Québec"},
+  "summary": {
+    "total_accidents": 8173, "pct_total_saaq": 2.7,
+    "pedestrians": 190, "cyclists": 119, "fatal_serious": 105,
+    "heavy_vehicles": 2250, "heavy_pct": 27.5,
+    "montreal_total": 2995, "montreal_pct": 36.6
+  },
+  "by_region": [
+    {"region":"Montréal","accidents":2995,"pietons":108,"cyclistes":91,"mortels":24},
+    {"region":"Montérégie","accidents":1259,"pietons":22,"cyclistes":10,"mortels":18},
+    {"region":"Capitale-Nationale","accidents":1193,"pietons":19,"cyclistes":8,"mortels":15},
+    {"region":"Chaudière-Appalaches","accidents":382,"pietons":8,"cyclistes":3,"mortels":9},
+    {"region":"Laval","accidents":358,"pietons":12,"cyclistes":4,"mortels":7},
+    {"region":"Laurentides","accidents":352,"pietons":6,"cyclistes":2,"mortels":8}
+  ],
+  "hourly": [
+    {"hour":"00-04h","count":481,"pct":5.9},
+    {"hour":"04-08h","count":826,"pct":10.1},
+    {"hour":"08-12h","count":1882,"pct":23.0},
+    {"hour":"12-16h","count":2296,"pct":28.1},
+    {"hour":"16-20h","count":1664,"pct":20.4},
+    {"hour":"20-24h","count":999,"pct":12.2}
+  ]
+}

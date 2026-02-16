@@ -1,0 +1,24 @@
+{
+  "metadata": {"source": "CNESST", "dataset": "Lésions professionnelles Construction (SCIAN 23)", "period": "2016-2022", "total_records": 54403, "license": "Données ouvertes Québec"},
+  "summary": {
+    "total_lesions": 54403, "urban_risk_component": 28093, "urban_risk_pct": 51.6,
+    "tms_total": 14154, "tms_pct": 26.0, "growth_2016_2022": 53.1
+  },
+  "yearly": [
+    {"year":2016,"lesions":6207,"tms":1446,"machine":322,"psy":32},
+    {"year":2017,"lesions":6592,"tms":1682,"machine":342,"psy":26},
+    {"year":2018,"lesions":7443,"tms":1761,"machine":326,"psy":38},
+    {"year":2019,"lesions":8234,"tms":2073,"machine":368,"psy":52},
+    {"year":2020,"lesions":7599,"tms":2056,"machine":490,"psy":48},
+    {"year":2021,"lesions":8826,"tms":2553,"machine":501,"psy":52},
+    {"year":2022,"lesions":9502,"tms":2583,"machine":517,"psy":57}
+  ],
+  "risk_genres": [
+    {"genre":"Frappé par objet","count":7847,"urban_score":9},
+    {"genre":"Réaction du corps","count":8384,"urban_score":2},
+    {"genre":"Effort excessif","count":8069,"urban_score":2},
+    {"genre":"Chute niveau inférieur","count":5815,"urban_score":7},
+    {"genre":"Chute même niveau","count":4528,"urban_score":4},
+    {"genre":"Coincé/écrasé","count":3022,"urban_score":6}
+  ]
+}
